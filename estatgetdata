@@ -1,0 +1,97 @@
+#!/bin/env sh
+
+# curl -o "/home/gilles/data/estattoc.txt" "https://ec.europa.eu/eurostat/estat-navtree-portlet-prod/BulkDownloadListing?sort=1&downfile=table_of_contents_fr.txt"
+
+command -v fzf >/dev/null 2>&1 || exit
+command -v xpath >/dev/null 2>&1 || exit
+
+# # fzf -e --exact match
+DATASET=$(cat /home/gilles/data/estattoc.txt | sed 's/^"[[:blank:]]*/"/g' | cut -d$'\t' -f1,2 | sort -u | \
+	fzf -e | \
+	awk -F'\t' '{ print $2 }' | \
+	sed 's/"//g')
+
+DSDURL="https://ec.europa.eu/eurostat/SDMX/diss-web/rest/datastructure/ESTAT/DSD_"
+RESPONSE=$(curl -s -o /dev/null -I -w "%{http_code}" "$DSDURL$DATASET")
+
+if [ "$RESPONSE" == "404" ]
+then
+	echo "DSD dwl fail!" && exit 0
+else
+	DSD=$(curl -s "$DSDURL$DATASET")
+fi
+
+# nb dim
+NBDIM=$(xpath -q -e "count(//str:Dimension/@id)" <<< "$DSD")
+
+# list dimension;moda;libmoda
+DIMENSIONVAL=$(for i in $(xpath -q -e "//str:Codelist/@id" <<< "$DSD" | cut -d'=' -f2)
+do
+	DIM=$(sed 's/"//g' <<< $i |cut -c4-)
+	CODEMODA=$(xpath -q -e "//str:Codelist[@id=$i]/str:Code/@id" <<< "$DSD" | cut -d'=' -f2 | sed 's/"//g')
+	LIBMODA=$(xpath -q -e "//str:Codelist[@id=$i]/str:Code/com:Name/text()" <<< "$DSD")
+	R1=$(paste <(echo "$CODEMODA") <(echo "$LIBMODA") -d ';')
+	R2=$(sed "s/^/$DIM;/" <<< $R1)
+	echo "$R2"
+done)
+
+DIMVALTOPRINT=$(grep -E -v "^OBS_(F|S)" <<< "$DIMENSIONVAL")
+DIMVALTOPRINT=$(sed "1 i\DIM\;CODEMODA\;LIBMODA" <<< "$DIMVALTOPRINT")
+
+clear
+
+column -t -s';' <<< "$DIMVALTOPRINT"
+
+# choose dim/val
+
+DIMVALSTR=""
+
+echo "
+=========================================
+Choix des codes modalités par dimension
+=========================================
+ Pour plusieurs moda, séparer par des +
+ Pour toutes les moda d'une dim, saisir *
+-----------------------------------------
+"
+
+for i in $(seq -s' ' 1 "$NBDIM")
+do
+	DIMNAME=$(xpath -q -e "(//str:Dimension/@id)[$i]" <<< "$DSD" | cut -d'=' -f2)
+	echo "Choisir les modalités de la dimension $DIMNAME"
+	read REPLY
+	DIMVALSTR="$DIMVALSTR$REPLY,"
+done
+
+# count occurence of * and test if length * == length dim
+NBBLANK=$(tr -cd "*" <<< "$DIMVALSTR" | wc -c)
+
+if [ $NBBLANK = $NBDIM ]
+then
+	RESULTAT=$(for i in $(seq -s' ' 1 "$NBDIM") ; do printf "." ; done)
+else
+	RESULTAT=$(sed -e 's/.$//g' -e 's/\,/./g' -e 's/*//g' <<< "$DIMVALSTR")
+fi
+
+SDMXROOT="https://ec.europa.eu/eurostat/SDMX/diss-web/rest/data/$DATASET/"
+
+echo "StartPeriod"
+read -r START
+echo "EndPeriod"
+read -r END
+
+STARTP="/?startPeriod=$START"
+ENDP="&endPeriod=$END"
+FINALURL="$SDMXROOT$RESULTAT$STARTP$ENDP"
+
+DATE=$(date +%Y%m%d)
+HOUR=$(date +%H%M)
+FILENAME="$DATE"_"$HOUR"_"$DATASET".xml
+
+echo "URL = $FINALURL"
+
+sleep 2
+
+curl -o "$FILENAME" "$FINALURL"
+
+echo "Le fichier $FILENAME a été créé dans le répertoire courant"
