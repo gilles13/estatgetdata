@@ -1,5 +1,5 @@
 # `estatgetdata`
-Download data from Eurostat SDMX REST API
+Download data from Eurostat SDMX REST API from the command line
 
 ## Required
 `xpath` and `fzf`
