@@ -1,6 +1,12 @@
 # `estatgetdata`
 Download data from Eurostat SDMX REST API
 
+## Required
+`xpath` and `fzf`
+
+* Archlinux : `sudo pacman -Sy perl-xml-xpath fzf`
+* Ubuntu : `sudo apt-get install libxml-xpath-perl fzf`
+
 ## Documentation
 [Eurostat](https://ec.europa.eu/eurostat/fr/home)
 
